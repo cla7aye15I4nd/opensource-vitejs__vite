@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, test } from 'vitest'
 import {
+  bundledDevTodo,
   editFile,
   findAssetFile,
   getBg,
@@ -8,7 +9,6 @@ import {
   getColor,
   isBuild,
   isBundled,
-  isBundledDev,
   page,
   removeFile,
   serverLogs,
@@ -38,7 +38,7 @@ test('linked css', async () => {
   // while the page is loading, and before the client has connected.
   // The update is then lost and never reaches the page.
   // That makes the edit steps below flaky when the suite runs in parallel
-  // (vitejs/vite#23028)
+  // (vitejs/vite#23028, rolldown/rolldown#10039)
   if (isBundled) return
 
   editFile('linked.css', (code) => code.replace('color: blue', 'color: red'))
@@ -58,6 +58,7 @@ test('css import from js', async () => {
   expect(await getColor(atImport)).toBe('purple')
 
   // bundled dev: same dropped update as 'linked css' above
+  // (vitejs/vite#23028, rolldown/rolldown#10039)
   if (isBundled) return
 
   editFile('imported.css', (code) => code.replace('color: green', 'color: red'))
@@ -80,6 +81,7 @@ test('postcss config', async () => {
   expect(await getColor(imported)).toBe('pink')
 
   // bundled dev: same dropped update as 'linked css' above
+  // (vitejs/vite#23028, rolldown/rolldown#10039)
   if (isBundled) return
 
   editFile('imported.css', (code) => code.replace('color: pink', 'color: red'))
@@ -414,13 +416,16 @@ test('minify css', async () => {
   expect(cssFile).not.toMatch('#ffff00b3')
 })
 
-// bundled dev turns css?url into a data: URI of the source file, without
-// running postcss on it. The rule this test looks for is never produced.
-// This is a real bug (vitejs/vite#22863).
-// The test passes again once it is fixed, with no change to the test.
-test.skipIf(isBundledDev)('?url', async () => {
-  expect(await getColor('.url-imported-css')).toBe('yellow')
-})
+test(
+  '?url',
+  bundledDevTodo(
+    '`?url` CSS skips the CSS pipeline and is inlined as raw bytes, so PostCSS does not run on it',
+    { vite: [22863] },
+  ),
+  async () => {
+    expect(await getColor('.url-imported-css')).toBe('yellow')
+  },
+)
 
 test('?raw', async () => {
   const rawImportCss = await page.$('.raw-imported-css')
@@ -429,7 +434,10 @@ test('?raw', async () => {
     readFileSync(require.resolve('../raw-imported.css'), 'utf-8'),
   )
 
-  // bundled dev: editing a ?raw import does not reach the page (vitejs/vite#23028)
+  // bundled dev: this edit reloads the whole page. Plain dev reloads it too.
+  // An edit that lands during the reload is dropped (same as 'linked css'
+  // above), so the 'sugarss' edits below become flaky
+  // (vitejs/vite#23028, rolldown/rolldown#10039)
   if (!isBundled) {
     editFile('raw-imported.css', (code) =>
       code.replace('color: yellow', 'color: blue'),
